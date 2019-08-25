@@ -5,7 +5,7 @@ import asyncio
 
 async def get_channel(request, services, *args, **kwargs):
     channel_uid = kwargs['url_data'].get('channel.id')
-    channel = Channel.nodes.first(uid=channel_uid)
+    channel = Channel.nodes.first_or_none(uid=channel_uid)
     if not channel:
         raise web.HTTPBadRequest()
     return web.json_response(jsonify(channel))
@@ -15,7 +15,7 @@ async def mod_channel(request, services, extensions, **kwargs):
     user = kwargs.get('user')
     ws = extensions.get('ws')
     channel_uid = kwargs['url_data'].get('channel.id')
-    channel = Channel.nodes.first(uid=channel_uid)
+    channel = Channel.nodes.first_or_none(uid=channel_uid)
     if not channel:
         raise web.HTTPBadRequest()
     board = channel.board_parent.single()
@@ -38,12 +38,14 @@ async def mod_channel(request, services, extensions, **kwargs):
 async def delete_channel(request, services, extensions, **kwargs):
     user = kwargs.get('user')
     ws = extensions.get('ws')
-    channel = Channel.nodes.first(uid=kwargs['url_data'].get('channel.id'))
+    channel = Channel.nodes.first_or_none(uid=kwargs['url_data'].get('channel.id'))
     if not channel:
         raise web.HTTPBadRequest()
     board = channel.board_parent.single()
     role_uid = board.subscribers.relationship(user).role
-    role = Role.nodes.first(uid=role_uid)
+    role = Role.nodes.first_or_none(uid=role_uid)
+    if not role:
+        raise web.HTTPBadRequest()
     if (role.permissions & 8 == 8) or (role.permissions & 16 == 16):
         j = jsonify(channel)
         channel.delete()
@@ -54,12 +56,14 @@ async def delete_channel(request, services, extensions, **kwargs):
 @user_wrapper
 async def get_messages(request, *args, **kwargs):
     user = kwargs.get('user')
-    channel = Channel.nodes.first(uid=kwargs['url_data'].get('channel.id'))
+    channel = Channel.nodes.first_or_none(uid=kwargs['url_data'].get('channel.id'))
     if not channel:
         raise web.HTTPBadRequest()
     board = channel.board_parent.single()
     role_uid = board.subscribers.relationship(user).role
-    role = Role.nodes.first(uid=role_uid)
+    role = Role.nodes.first_or_none(uid=role_uid)
+    if not role:
+        raise web.HTTPBadRequest()
     if (role.permissions & 8 == 8) or (role.permissions & 1024 == 1024):
         if not ((role.permissions & 65536 == 65536) or (role.permissions & 8 == 8)):
             return web.json_response([])
@@ -89,15 +93,17 @@ async def get_messages(request, *args, **kwargs):
 @user_wrapper
 async def get_message(request, *args, **kwargs):
     user = kwargs.get('user')
-    channel = Channel.nodes.first(uid=kwargs['url_data'].get('channel.id'))
+    channel = Channel.nodes.first_or_none(uid=kwargs['url_data'].get('channel.id'))
     if not channel:
         raise web.HTTPBadRequest()
     board = channel.board_parent.single()
     role_uid = board.subscribers.relationship(user).role
-    role = Role.nodes.first(uid=role_uid)
+    role = Role.nodes.first_or_none(uid=role_uid)
+    if not role:
+        raise web.HTTPBadRequest()
     if (role.permissions & 8 == 8) or (role.permissions & 65536 == 65536):
         message_uid = kwargs['url_data'].get('message.id')
-        message = channel.messages.filter(uid__exact=message_uid).first()
+        message = channel.messages.filter(uid__exact=message_uid).first_or_none()
         if not message:
             raise web.HTTPBadRequest()
         return web.json_response(jsonify(message))
@@ -109,15 +115,22 @@ async def create_message(request, services, extensions, **kwargs):
     ws = extensions.get('ws')
     snowflake = services.get('snowflake')
     websocket = services.get('websocket')
-    channel = Channel.nodes.first(uid=kwargs['url_data'].get('channel.id'))
+    try:
+        channel = Channel.nodes.first_or_none(uid=kwargs['url_data']['channel.id'])
+    except KeyError:
+        raise web.HTTPBadRequest()
     if not channel:
         raise web.HTTPBadRequest()
     board = channel.board_parent.single()
     role_uid = board.subscribers.relationship(user).role
-    role = Role.nodes.first(uid=role_uid)
+    role = Role.nodes.first_or_none(uid=role_uid)
+    if not role:
+        raise web.HTTPBadRequest()
     if (role.permissions & 8 == 8) or (role.permissions & 2048 == 2048):
         message_data = await request.json()
         content = message_data['content']
+        if content == '':
+            raise web.HTTPBadRequest()
         new_message = Message(uid=await snowflake(), content=content)
         new_message.save()
         new_message.author.connect(user)

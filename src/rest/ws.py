@@ -23,15 +23,9 @@ class RoamWebSocketHandler:
         t1 = asyncio.create_task(self._keep_alive())
         t2 = asyncio.create_task(self._handle_msg())
         t3 = asyncio.create_task(self._handle_event())
-        for board in self.user.boards:
-            await self.websocket.send(json.dumps({
-                'op': 0,
-                't': 'BOARD_CREATE',
-                'd': jsonify(board, requester=self.user)}))
-        await self._stop.wait()
-        t1.cancel()
-        t2.cancel()
-        t3.cancel()
+        async for board in stream.iterate(self.user.boards):
+            await self.events.put((EventType.BOARD_CREATE, board))
+        await asyncio.wait([t1, t2, t3])
 
     async def _handle_event(self):
         while True:
@@ -50,20 +44,37 @@ class RoamWebSocketHandler:
             await self.websocket.send(json.dumps(data))
 
     async def _handle_msg(self):
+        incorrect_blips = 0
         while True:
-            msg = json.loads(await self.websocket.recv())
-            if msg['op'] == 1:
-                if time() - self.last_heartbeat < 15:
-                    await self.websocket.send(json.dumps({'op': 12}))
-                else:
-                    await self.websocket.send(json.dumps({'op': 11}))
-                    self.last_heartbeat = time()
+            try:
+                msg = json.loads(await asyncio.wait_for(self.websocket.recv(), timeout=1))
+            except asyncio.TimeoutError:
+                pass
+            else:
+                if msg['op'] == 1:
+                    if time() - self.last_heartbeat < 15:
+                        if incorrect_blips == 5:
+                            await self.websocket.close(4008, 'Too fast, slow down')
+                            self._stop.set()
+                            return
+                        await self.websocket.send(json.dumps({'op': 12}))
+                        incorrect_blips += 1
+                    else:
+                        await self.websocket.send(json.dumps({'op': 11}))
+                        self.last_heartbeat = time()
+                        incorrect_blips = 0
+                elif msg['op'] == 2:
+                    await self.websocket.close(4005, 'Already authenticated')
+                    self._stop.set()
+                    return
 
     async def _keep_alive(self):
         while True:
             await asyncio.sleep(1)
             if time() - self.last_heartbeat > 25:
+                await self.websocket.close(4009, 'Too slow')
                 self._stop.set()
+                return
 
 class WebSocketExtension(Extension):
     def __init__(self, host, port):
@@ -94,25 +105,35 @@ class WebSocketExtension(Extension):
         await websocket.send(json.dumps({
             'op': 10,
             'd': {'heartbeat_interval': 20000}}))
-        identify = json.loads(await websocket.recv())
-        print(identify)
-        token_data = identify['d']['token']
+        try:
+            identify = json.loads(await websocket.recv())
+        except json.decoder.JSONDecodeError:
+            await websocket.close(4002, 'What was that?')
+            return
+        try:
+            if identify['op'] != 2:
+                await websocket.close(4003, 'Not authenticated')
+                return
+            token_data = identify['d']['token']
+        except KeyError:
+            await websocket.close(4001, 'The identify payload was not valid')
+            return
         user_details = await auth.get_user(token_data)
-        print(user_details)
-        if user_details != {}:
-            user_object = User.nodes.first(uid=user_details['uid'])
-            handler = RoamWebSocketHandler(websocket, user_object)
-            boards = user_object.boards
-            self.handlers[user_details['uid']] = handler
-            await websocket.send(json.dumps({
-                'op': 0,
-                'd': {
-                    'user': jsonify(user_object),
-                    'boards': [{'uid': b.uid, 'unavailable': True} for b in boards]},
-                't': 'READY'
-            }))
-            print('SENT "BOARD_CREATE" EVENT')
-            await handler()
+        if user_details == {}:
+            await websocket.close(4004, 'The token you sent is invalid')
+            return
+        user_object = User.nodes.first(uid=user_details['uid'])
+        handler = RoamWebSocketHandler(websocket, user_object)
+        boards = user_object.boards
+        self.handlers[user_details['uid']] = handler
+        await websocket.send(json.dumps({
+            'op': 0,
+            'd': {
+                'user': jsonify(user_object),
+                'boards': [{'uid': b.uid, 'unavailable': True} for b in boards]},
+            't': 'READY'
+        }))
+        await handler()
 
     async def __call__(self, services, extensions):
         self.services = services

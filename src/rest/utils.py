@@ -118,15 +118,21 @@ def jsonify(o, **kwargs):
             'owner_uids': [owner.uid for owner in owners],
             'owner': requester in owners}
     elif isinstance(o, Channel):
-        last_message = o.messages.order_by('-uid').first()
-        return {
+        if o.messages:
+            last_message = o.messages.order_by('-uid').first()
+        else:
+            last_message = None
+        j = {
             'uid': o.uid,
             'type': o.type,
             'name': o.name,
             'topic': o.topic,
             'position': o.position,
-            'last_message_uid': last_message.uid
+            'board_uid': o.board_parent.single().uid
         }
+        if last_message:
+            j['last_message_uid'] = last_message.uid
+        return j
     elif isinstance(o, Role):
         return {
             'uid': o.uid,

@@ -1,11 +1,14 @@
-from aiohttp import web
-from db import User, Board, Role, Channel
-from utils import user_wrapper, jsonify, EventType
+"""Handlers for board based endpoints"""
 from math import ceil
-import asyncio
+from aiohttp import web
+from aiostream import stream
+
+from db import Board, Role, Channel
+from utils import user_wrapper, jsonify, EventType
 
 @user_wrapper
 async def create_board(request, services, extensions, **kwargs):
+    """handler to create a new board"""
     sent_data = await request.json()
     ws = extensions.get('ws')
     jwt = services.get('jwt')
@@ -47,8 +50,10 @@ async def create_board(request, services, extensions, **kwargs):
     await ws.event(EventType.BOARD_CREATE, new_board.subscribers, board=new_board)
     return web.json_response(jsonify(new_board, requester=user))
 
+
 @user_wrapper
 async def get_board(*args, **kwargs):
+    """Handler to return info about a board from a given uid"""
     user = kwargs.get('user')
 
     url_data = kwargs.get('url_data')
@@ -63,6 +68,7 @@ async def get_board(*args, **kwargs):
 
 @user_wrapper
 async def mod_board(request, services, extensions, **kwargs):
+    """Handler to change the properties of a given board"""
     user = kwargs.get('user')
     ws = extensions.get('ws')
     url_data = kwargs.get('url_data')
@@ -83,6 +89,7 @@ async def mod_board(request, services, extensions, **kwargs):
 
 @user_wrapper
 async def delete_board(request, services, *args, **kwargs):
+    """Handler to delete a board from a given uid"""
     user = kwargs.get('user')
     board_uid = kwargs.get('url_data')['board.id']
     board = Board.nodes.first_or_none(uid=board_uid)
@@ -97,15 +104,16 @@ async def delete_board(request, services, *args, **kwargs):
     bds.create(board, user, votes_needed)
     raise web.HTTPAccepted(text=f"{len(bds.timers[board.uid].votes)}/{votes_needed} Votes counted")
 
-@user_wrapper
 async def get_channels(*args, **kwargs):
-    user = kwargs.get('user')
     board_uid = kwargs.get('url_data')['board.id']
     board = Board.nodes.first_or_none(uid=board_uid)
     if not board:
         return web.HTTPBadRequest()
     channels = board.channel_children
-    return web.json_response([jsonify(channel) for channel in channels])
+    j = []
+    async for channel in stream.iterate(channels):
+        j.append(jsonify(channel))
+    return web.json_response(j)
 
 @user_wrapper
 async def create_channel(request, services, extensions, *args, **kwargs):
@@ -121,12 +129,18 @@ async def create_channel(request, services, extensions, *args, **kwargs):
     if (user_role.permissions & 8 == 8) or (user_role.permissions & 16 == 16):
         sent_data = await request.json()
         name = sent_data['name']
+        position = sent_data.get('position')
+        if not position:
+            try:
+                position = max(c.uid for c in board.channel_children)+1
+            except ValueError:
+                position = 0
         new_channel = Channel(
             uid=await snowflake(),
             name=name,
             type=sent_data.get('type') or 0,
             topic=sent_data.get('topic') or '',
-            position=sent_data.get('position') or 0
+            position=position
         )
         new_channel.save()
         board.channel_children.connect(new_channel)
@@ -148,9 +162,13 @@ async def move_channel_positions(request, services, extensions, *args, **kwargs)
         sent_data = await request.json()
         if len(sent_data) < 2:
             raise web.HTTPBadRequest()
-        for data in sent_data:
+        positions = set(i['position'] for i in sent_data)
+        if len(positions) != len(sent_data):
+            raise web.HTTPBadRequest(reason='Positions cannot overlap')
+        async for data in stream.iterate(sent_data):
             channel = board.channel_children.filter(uid__exact=data['uid']).first()
             channel.position = data['position']
             channel.save()
             await ws.event(EventType.CHANNEL_UPDATE, board.subscribers, channel=channel)
         raise web.HTTPNoContent()
+    raise web.HTTPForbidden(reason='Permission MANAGE_CHANNELS not set')
