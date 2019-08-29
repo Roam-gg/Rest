@@ -95,13 +95,13 @@ def snowflake_to_time(snowflake):
 
 def user_wrapper(func):
     @wraps(func)
-    async def wrapper(request, services, extensions, **kwargs):
-        auth = services.get('roamgg_token')
-        token_str = request.headers.get('Authorization')
+    async def wrapper(ctx):
+        auth = ctx.services.get('roamgg_token')
+        token_str = ctx.raw_request.headers.get('Authorization')
         user_uid = (await auth.get_user(token_str))['uid']
         user_object = User.nodes.first(uid=user_uid)
-        kwargs['user'] = user_object
-        return await func(request, services, extensions, **kwargs)
+        ctx.user = user_object
+        return await func(ctx)
     return wrapper
 
 
