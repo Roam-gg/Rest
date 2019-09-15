@@ -5,7 +5,8 @@ import os
 
 from neomodel import db as neodb
 import neo4j
-from roamrs import HTTPServer, Method
+from roamrs import HTTPServer
+from roamrs.auth import TokenValidator
 from ws import WebSocketExtension
 
 from utils import SnowflakeService, BoardDeleteService
@@ -14,7 +15,7 @@ from board import BoardCog
 from channel import ChannelCog
 
 def main():
-    """Run the servur"""
+    """Run the server"""
     env = os.environ
     while True:
         try:
@@ -24,14 +25,14 @@ def main():
         else:
             break
     loop = asyncio.get_event_loop()
-    snow = SnowflakeService.service_factory(f'http://{env["SNOW_HOST"]}:8080/')
-    boardds = BoardDeleteService.service_factory()
+    snow = SnowflakeService(f'http://{env["SNOW_HOST"]}:8080/')
+    boardds = BoardDeleteService()
+    auth = TokenValidator(f'http://{env["AUTH_HOST"]}')
     websocket = WebSocketExtension('0.0.0.0', 8000)
     server = HTTPServer(
-        {'snowflake': snow, 'board_delete': boardds},
+        {'snowflake': snow, 'board_delete': boardds, 'auth': auth},
         {'ws': websocket},
-        port=80,
-        security_url=f'http://{env["AUTH_HOST"]}')
+        port=80)
     cogs = [UserCog(), BoardCog(), ChannelCog()]
 
     for cog in cogs:

@@ -19,7 +19,7 @@ class EventType(Enum):
 
 class SnowflakeService(Service):
     __slots__ = ('url', '__session')
-    def __init__(self, url, *args, **kwargs):
+    def __init__(self, _, __, url, *args, **kwargs):
         self.url = url
         self.__session = ClientSession()
 
@@ -70,8 +70,8 @@ class BoardDeleteTimer(CheckForTime):
 
 class BoardDeleteService(Service):
     #__slots__ = ('timers', '_task', 'loop', 'ws')
-    def __init__(self, extensions):
-        self.ws = extensions.get('ws')
+    def __init__(self, extensions, services):
+        self.ws = extensions['ws']
         self.timers = {}
 
     def create(self, board, user, required_votes):
