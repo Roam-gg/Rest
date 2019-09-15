@@ -1,7 +1,9 @@
 """Run the rest server"""
 from time import sleep
+from sys import stdout
 import asyncio
 import os
+import logging
 
 from neomodel import db as neodb
 import neo4j
@@ -13,6 +15,14 @@ from utils import SnowflakeService, BoardDeleteService
 from user import UserCog
 from board import BoardCog
 from channel import ChannelCog
+
+LOGGER = logging.getLogger(__name__)
+LOGGER.setLevel(logging.INFO)
+HANDLER = logging.StreamHandler(stdout)
+HANDLER.setLevel(logging.INFO)
+FORMATTER = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+HANDLER.setFormatter(FORMATTER)
+LOGGER.addHandler(HANDLER)
 
 def main():
     """Run the server"""
