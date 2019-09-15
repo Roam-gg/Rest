@@ -107,7 +107,7 @@ class BoardCog(Cog):
         bds.create(board, user, votes_needed)
         raise web.HTTPAccepted(text=f"{len(bds.timers[board.uid].votes)}/{votes_needed} Votes counted")
 
-    @route('/board/{board.id}/channels', Method.GET)
+    @route('/boards/{board.id}/channels', Method.GET)
     async def get_channels(self, ctx):
         board_uid = ctx.url_data['board.id']
         board = Board.nodes.first_or_none(uid=board_uid)
@@ -119,7 +119,7 @@ class BoardCog(Cog):
             j.append(jsonify(channel))
         return ctx.respond(j)
 
-    @route('/board/{board.id}/channels', Method.POST)
+    @route('/boards/{board.id}/channels', Method.POST)
     @user_wrapper
     async def create_channel(self, ctx):
         snowflake = ctx.services.get('snowflake')
