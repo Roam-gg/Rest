@@ -1,4 +1,4 @@
 aiostream
 neomodel
 websockets
-roamrs>=0.3.2
+roamrs>=0.3.3
